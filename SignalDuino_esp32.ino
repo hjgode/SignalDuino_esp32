@@ -152,6 +152,7 @@ void loop() {
   }
     blinkLED=true;
     blinken();
+//after every loop SerialEvent is called if Serial.Available, SerialEvent sets the command_available var then (or not)
 }
 
 //timer interrupt
