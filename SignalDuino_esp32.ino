@@ -68,7 +68,9 @@ String cmdstring = "";
 void IRAM_ATTR handleInterrupt();
 void enableReceive();
 void disableReceive();
-void serialEvent();
+//usinng mod of https://gist.github.com/shaielc/28a94b39dbd232974a6d78e384d44b0f
+void IRAM_ATTR serialEvent();
+
 void blinken();
 int freeRam();
 void changeReciver();
@@ -92,6 +94,9 @@ void setup() {
   Serial.println(FiFo.getBuffSize());
   #endif
   //delay(2000);
+  //see mod at https://gist.github.com/shaielc/28a94b39dbd232974a6d78e384d44b0f
+//  Serial.setInterrupt(&serialEvent);
+  
   pinMode(PIN_RECEIVE,INPUT);
   pinMode(PIN_SEND,OUTPUT);
   pinMode(PIN_LED,OUTPUT);
@@ -153,6 +158,7 @@ void loop() {
     blinkLED=true;
     blinken();
 //after every loop SerialEvent is called if Serial.Available, SerialEvent sets the command_available var then (or not)
+  serialEvent(); //manual call as no event?!
 }
 
 //timer interrupt
@@ -460,7 +466,7 @@ void IT_CMDs() {
 
 }
 
-void serialEvent()
+void IRAM_ATTR serialEvent()
 {
   while (Serial.available())
   {
