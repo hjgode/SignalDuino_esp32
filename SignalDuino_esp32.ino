@@ -43,6 +43,20 @@ const int LED_PIN = 5;
 //#include "bitstore.h"  // local copy!
 #include "patternDecoder.h" //Logilink, IT decoder
 
+//WiFi client
+#include <WiFi.h>
+const char* ssid     = "Horst1";
+const char* password = "1234567890123";
+WiFiClient wifiClient;
+
+//MQTT stuff
+#include <PubSubClient.h>
+PubSubClient mqtt_client;
+const char* mqtt_server = "192.168.0.40";
+const byte  mqtt_port = 1883;
+const char* mqtt_basetopic = "SignalDuino";
+char mqtt_text[255];
+
 //### esp32 Timer for blinking
 hw_timer_t * timer = NULL;
 volatile SemaphoreHandle_t timerSemaphore;
@@ -82,7 +96,48 @@ bool command_available=false;
 //Decoder
 patternDecoder musterDec;
 
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i=0;i<length;i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+}
 
+void WiFiEvent(WiFiEvent_t event)
+{
+    Serial.printf("[WiFi-event] event: %d\n", event);
+
+    switch(event) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+        Serial.println("WiFi connected");
+        Serial.println("IP address: ");
+        Serial.println(WiFi.localIP());
+        //###### MQTT
+        mqtt_client.setClient(wifiClient);
+        mqtt_client.setServer(mqtt_server, mqtt_port);
+        mqtt_client.setCallback(mqtt_callback);
+        // mqtt_client is now configured for use
+        mqtt_client.connect("SignalDuino");
+        if (mqtt_client.connect("SignalDuino")) {
+          Serial.println("MQTT connected");
+          // Once connected, publish an announcement...
+          printf(mqtt_text, "%s/%s", mqtt_basetopic, "status");
+          mqtt_client.publish(mqtt_text,"connected");
+          // ... and resubscribe
+          printf(mqtt_text, "%s/%s", mqtt_basetopic, "cmd");
+          mqtt_client.subscribe(mqtt_text);
+        } else {
+          Serial.println("MQTT connect failed");
+        }
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.println("WiFi lost connection");
+        break;
+    }
+}
 
 void setup() {
   Serial.begin(BAUDRATE);
@@ -123,6 +178,13 @@ void setup() {
 
   enableReceive();
   cmdstring.reserve(20);
+
+  //##### WiFi
+  // delete old config
+  WiFi.disconnect(true);
+  delay(1000);
+  WiFi.onEvent(WiFiEvent);
+  WiFi.begin(ssid, password);
 }
 
 void blinken() {
@@ -157,8 +219,10 @@ void loop() {
   }
     blinkLED=true;
     blinken();
-//after every loop SerialEvent is called if Serial.Available, SerialEvent sets the command_available var then (or not)
+
+  //after every loop SerialEvent is called if Serial.Available, SerialEvent sets the command_available var then (or not)
   serialEvent(); //manual call as no event?!
+
 }
 
 //timer interrupt
@@ -376,7 +440,7 @@ void HandleCommand()
   }
   // V: Version
   else if (cmdstring.charAt(0) == cmd_Version) {
-    Serial.println("V " PROGVERS " SIGNALduino - compiled at " __DATE__ " " __TIME__);
+    Serial.println("V " PROGVERS " " PROGNAME " - compiled at " __DATE__ " " __TIME__);
   }
   // R: FreeMemory
   else if (cmdstring.charAt(0) == cmd_freeRam) {
