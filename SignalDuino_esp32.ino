@@ -51,11 +51,14 @@ WiFiClient wifiClient;
 
 //MQTT stuff
 #include <PubSubClient.h>
-PubSubClient mqtt_client;
+PubSubClient mqtt_client(wifiClient);
 const char* mqtt_server = "192.168.0.40";
 const byte  mqtt_port = 1883;
 const char* mqtt_basetopic = "SignalDuino";
 char mqtt_text[255];
+#define TOPIC_STATUS "SignalDuino/status"
+#define TOPIC_MSG "SignalDuino/msg"
+#define TOPIC_CMD "SignalDuino/cmd"
 
 //### esp32 Timer for blinking
 hw_timer_t * timer = NULL;
@@ -106,6 +109,25 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   Serial.println();
 }
 
+void mqtt_connect(){
+  //###### MQTT
+  if( !mqtt_client.connected() ) {
+//      mqtt_client.setClient(wifiClient);
+      // mqtt_client is now configured for use
+      if (mqtt_client.connect("SignalDuino")) {
+        Serial.println("MQTT connected");
+        // Once connected, publish an announcement...
+        mqtt_client.publish(TOPIC_STATUS,"connected");
+        // ... and resubscribe
+        mqtt_client.subscribe(TOPIC_CMD);
+      } else {
+        Serial.println("MQTT connect failed");
+        Serial.print("failed, status code =");
+        Serial.print(mqtt_client.state());
+      }
+  }
+}
+
 void WiFiEvent(WiFiEvent_t event)
 {
     Serial.printf("[WiFi-event] event: %d\n", event);
@@ -115,23 +137,7 @@ void WiFiEvent(WiFiEvent_t event)
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
         Serial.println(WiFi.localIP());
-        //###### MQTT
-        mqtt_client.setClient(wifiClient);
-        mqtt_client.setServer(mqtt_server, mqtt_port);
-        mqtt_client.setCallback(mqtt_callback);
-        // mqtt_client is now configured for use
-        mqtt_client.connect("SignalDuino");
-        if (mqtt_client.connect("SignalDuino")) {
-          Serial.println("MQTT connected");
-          // Once connected, publish an announcement...
-          printf(mqtt_text, "%s/%s", mqtt_basetopic, "status");
-          mqtt_client.publish(mqtt_text,"connected");
-          // ... and resubscribe
-          printf(mqtt_text, "%s/%s", mqtt_basetopic, "cmd");
-          mqtt_client.subscribe(mqtt_text);
-        } else {
-          Serial.println("MQTT connect failed");
-        }
+        mqtt_connect();
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection");
@@ -185,6 +191,9 @@ void setup() {
   delay(1000);
   WiFi.onEvent(WiFiEvent);
   WiFi.begin(ssid, password);
+  //##### MQTT
+  mqtt_client.setServer(mqtt_server, mqtt_port);
+  mqtt_client.setCallback(mqtt_callback);
 }
 
 void blinken() {
@@ -223,6 +232,9 @@ void loop() {
   //after every loop SerialEvent is called if Serial.Available, SerialEvent sets the command_available var then (or not)
   serialEvent(); //manual call as no event?!
 
+  if(!mqtt_client.connected())
+    mqtt_connect();
+  mqtt_client.loop();
 }
 
 //timer interrupt
