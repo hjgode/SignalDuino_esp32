@@ -56,6 +56,7 @@ patternBasic::patternBasic() {
 	reset();
 }
 
+
 void patternBasic::reset()
 {
 	patternLen = 0;
@@ -577,6 +578,13 @@ patternDecoder::patternDecoder(): patternDetector() {
 	*/
 	numprotos=0;
 }
+#ifdef USESOCKET
+patternDecoder::patternDecoder(WiFiClient* client):patternDetector() {
+    _client=client;
+	numprotos=0;
+}
+#endif
+
 void patternDecoder::reset() {
     patternDetector::reset();
 }
@@ -791,6 +799,13 @@ void patternDecoder::printMsgStr(String *first, String *second, String *third)
 	Serial.print(*first);
 	Serial.print(*second);
 	Serial.print(*third);
+#ifdef USESOCKET
+    if(_client){
+        _client->print(*first);
+        _client->print(*second);
+        _client->print(*third);
+    }
+#endif
 }
 
 /** @brief (Convertes message array into string for serial output)
@@ -800,6 +815,10 @@ void patternDecoder::printMsgStr(String *first, String *second, String *third)
 
 void patternDecoder::printMsgRaw(uint8_t m_start, uint8_t m_end, String *preamble,String *postamble)
 {
+#ifdef USESOCKET
+    if(_client)
+        _client->print(*preamble);
+#endif
 
 	Serial.print(*preamble);
 	//String msg;
@@ -808,9 +827,17 @@ void patternDecoder::printMsgRaw(uint8_t m_start, uint8_t m_end, String *preambl
 	{
 		//msg + =message[m_start];
 		Serial.print(message[m_start]);
+#ifdef USESOCKET
+        if(_client)
+            _client->print(message[m_start]);
+#endif
 	}
 	//Serial.print(msg);
 	Serial.print(*postamble);
+#ifdef USESOCKET
+    if(_client)
+        _client->print(*postamble);
+#endif
 	//printMsgStr(preamble,&msg,postamble);
 }
 

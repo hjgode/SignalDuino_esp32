@@ -24,6 +24,10 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+samples:
+mosquitto_pub -h atom2 -t SignalDuino/cmd -m "hello"
+mosquitto_sub -h atom2 -v -t SignalDuino/#
+
 */
 
 const int LED_PIN = 5;
@@ -47,18 +51,11 @@ const int LED_PIN = 5;
 #include <WiFi.h>
 const char* ssid     = "Horst1";
 const char* password = "1234567890123";
-WiFiClient wifiClient;
+WiFiServer wifiServer(23); //serve connections to port 23
+WiFiClient wifiClient; //client that is connected
 
-//MQTT stuff
-#include <PubSubClient.h>
-PubSubClient mqtt_client(wifiClient);
-const char* mqtt_server = "192.168.0.40";
-const byte  mqtt_port = 1883;
-const char* mqtt_basetopic = "SignalDuino";
-char mqtt_text[255];
-#define TOPIC_STATUS "SignalDuino/status"
-#define TOPIC_MSG "SignalDuino/msg"
-#define TOPIC_CMD "SignalDuino/cmd"
+#include <ESP32Ticker.h>
+Ticker wifiReconnectTimer;
 
 //### esp32 Timer for blinking
 hw_timer_t * timer = NULL;
@@ -97,52 +94,36 @@ bool command_available=false;
 
 
 //Decoder
-patternDecoder musterDec;
+patternDecoder musterDec(&wifiClient);
 
-void mqtt_callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i=0;i<length;i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
+void connectToWifi() {
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.begin(ssid, password);
+  delay(3000);
+  yield();
 }
 
-void mqtt_connect(){
-  //###### MQTT
-  if( !mqtt_client.connected() ) {
-//      mqtt_client.setClient(wifiClient);
-      // mqtt_client is now configured for use
-      if (mqtt_client.connect("SignalDuino")) {
-        Serial.println("MQTT connected");
-        // Once connected, publish an announcement...
-        mqtt_client.publish(TOPIC_STATUS,"connected");
-        // ... and resubscribe
-        mqtt_client.subscribe(TOPIC_CMD);
-      } else {
-        Serial.println("MQTT connect failed");
-        Serial.print("failed, status code =");
-        Serial.print(mqtt_client.state());
-      }
-  }
-}
-
-void WiFiEvent(WiFiEvent_t event)
-{
+void WiFiEvent(WiFiEvent_t event) {
     Serial.printf("[WiFi-event] event: %d\n", event);
-
     switch(event) {
     case SYSTEM_EVENT_STA_GOT_IP:
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
         Serial.println(WiFi.localIP());
-        mqtt_connect();
+//        connectToMqtt();
+        yield();
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection");
+//        mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+        wifiReconnectTimer.once(2, connectToWifi);
         break;
     }
+}
+
+void blinken() {
+     digitalWrite(PIN_LED, blinkLED);
+     blinkLED=false;
 }
 
 void setup() {
@@ -163,7 +144,22 @@ void setup() {
   pinMode(PIN_LED,OUTPUT);
     
     blinkLED=true;
-    blinken();
+///    blinken(); //will stop wifi connection!
+
+  //##### WiFi
+  // delete old config
+  WiFi.disconnect(true);
+  delay(1000);
+  WiFi.onEvent(WiFiEvent);
+  connectToWifi();
+  while (WiFi.status() != WL_CONNECTED) {
+    yield();
+    delay(500);
+    Serial.print(".");
+  }
+
+  wifiServer.begin();
+
 //  Timer1.initialize(25*1000); //Interrupt wird jede n Millisekunden ausgel�st
 //  Timer1.attachInterrupt(blinken);
 
@@ -185,20 +181,10 @@ void setup() {
   enableReceive();
   cmdstring.reserve(20);
 
-  //##### WiFi
-  // delete old config
-  WiFi.disconnect(true);
-  delay(1000);
-  WiFi.onEvent(WiFiEvent);
-  WiFi.begin(ssid, password);
-  //##### MQTT
-  mqtt_client.setServer(mqtt_server, mqtt_port);
-  mqtt_client.setCallback(mqtt_callback);
-}
+  Serial.print("Ready! Use 'telnet ");
+  Serial.print(WiFi.localIP());
+  Serial.println(" 23' to connect");
 
-void blinken() {
-     digitalWrite(PIN_LED, blinkLED);
-     blinkLED=false;
 }
 
 void loop() {
@@ -218,7 +204,7 @@ void loop() {
   */
   if (command_available) {
     command_available=false;
-    HandleCommand();
+    HandleCommand(cmdstring);
     if (!command_available) { cmdstring = ""; }
     blinkLED=true;
   }
@@ -228,13 +214,75 @@ void loop() {
   }
     blinkLED=true;
     blinken();
-
+    
+  if(wifiClient){
+      if(wifiClient.available()){
+        char inChar = (char)wifiClient.read();
+        switch(inChar)
+        {
+          case '\n':
+          case '\r':
+          case '\0':
+          case '#':
+          command_available=true;
+          break;
+          default:
+            cmdstring += inChar;
+        }
+      }//available    
+  }//wifiClient
+  else{
+      wifiClient=wifiServer.available();
+  }
+/*
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiServer.hasClient()){
+      if (!wifiClient || !wifiClient.connected()){
+        if(wifiClient) 
+          wifiClient.stop();
+        Serial.println(wifiClient.remoteIP());
+      }
+    }//has clientt
+    if (wifiClient && wifiClient.connected()){
+      if(wifiClient.available()){
+        //get data from the telnet client and push it to the UART
+        while(wifiClient.available()) {
+          String line = wifiClient.readStringUntil('\r');
+          command_available=true;
+          char inChar = (char)wifiClient.read();
+          switch(inChar)
+          {
+            case '\n':
+            case '\r':
+            case '\0':
+            case '#':
+            command_available=true;
+            break;
+            default:
+              cmdstring += inChar;
+          }
+          
+  //        Serial.write(wifiClient.read());
+        }//while available
+      }//if available
+    }//connected
+    else {
+      if (wifiClient) {
+        wifiClient.stop();
+      }
+    }//else connected
+  }//WL_CONNECTED
+  else {
+    //Serial.println("WiFi not connected!");
+    if (wifiClient)
+      wifiClient.stop();
+    //delay(1000);
+    yield();
+  }//else WL_CONNECTED
+*/
   //after every loop SerialEvent is called if Serial.Available, SerialEvent sets the command_available var then (or not)
   serialEvent(); //manual call as no event?!
 
-  if(!mqtt_client.connected())
-    mqtt_connect();
-  mqtt_client.loop();
 }
 
 //timer interrupt
@@ -366,7 +414,7 @@ void send_raw(int16_t *buckets)
 }
 
 //SR;R=3;P0=123;P1=312;P2=400;P3=600;D=010101020302030302;
-void send_cmd()
+void send_cmd(String cmdstring)
 {
   if (cmdstring.charAt(1) == 'R')
   {
@@ -420,7 +468,7 @@ void send_cmd()
 //================================= Kommandos ======================================
 void IT_CMDs();
 
-void HandleCommand()
+void HandleCommand(String cmdstring)
 {
 
   const char cmd_Version ='V';
@@ -438,25 +486,40 @@ void HandleCommand()
 
   if (cmdstring.charAt(0) == cmd_help) {
     //Serial.println(F("? Use one of V R i t X"));//FHEM Message
-  Serial.print(cmd_help); Serial.print(F(" Use one of "));
-  Serial.print(cmd_Version);Serial.print(cmd_space);
-  Serial.print(cmd_intertechno);Serial.print(cmd_space);
-  Serial.print(cmd_freeRam);Serial.print(cmd_space);
-  Serial.print(cmd_uptime);Serial.print(cmd_space);
-  Serial.print(cmd_changeReceiver);Serial.print(cmd_space);
-  Serial.print(cmd_changeFilter);Serial.print(cmd_space);
-  Serial.print(cmd_send);Serial.print(cmd_space);
-
-  Serial.println("");
-
+    Serial.print(cmd_help); Serial.print(F(" Use one of "));
+    Serial.print(cmd_Version);Serial.print(cmd_space);
+    Serial.print(cmd_intertechno);Serial.print(cmd_space);
+    Serial.print(cmd_freeRam);Serial.print(cmd_space);
+    Serial.print(cmd_uptime);Serial.print(cmd_space);
+    Serial.print(cmd_changeReceiver);Serial.print(cmd_space);
+    Serial.print(cmd_changeFilter);Serial.print(cmd_space);
+    Serial.print(cmd_send);Serial.print(cmd_space);
+  
+    Serial.println("");
+    if(wifiClient){
+      wifiClient.print(cmd_help); wifiClient.print(F(" Use one of "));
+      wifiClient.print(cmd_Version);wifiClient.print(cmd_space);
+      wifiClient.print(cmd_intertechno);wifiClient.print(cmd_space);
+      wifiClient.print(cmd_freeRam);wifiClient.print(cmd_space);
+      wifiClient.print(cmd_uptime);wifiClient.print(cmd_space);
+      wifiClient.print(cmd_changeReceiver);wifiClient.print(cmd_space);
+      wifiClient.print(cmd_changeFilter);wifiClient.print(cmd_space);
+      wifiClient.print(cmd_send);wifiClient.print(cmd_space);
+      
+    }
   }
   // V: Version
   else if (cmdstring.charAt(0) == cmd_Version) {
     Serial.println("V " PROGVERS " " PROGNAME " - compiled at " __DATE__ " " __TIME__);
+    if(wifiClient)
+      wifiClient.println("V " PROGVERS " " PROGNAME " - compiled at " __DATE__ " " __TIME__);
   }
   // R: FreeMemory
   else if (cmdstring.charAt(0) == cmd_freeRam) {
     Serial.println(freeRam());
+    if(wifiClient){
+      wifiClient.println(freeRam());
+    }
   }
   // i: Intertechno
   else if (cmdstring.charAt(0) == cmd_intertechno) {
@@ -464,7 +527,7 @@ void HandleCommand()
   {
     command_available=true;
   } else {
-    IT_CMDs();
+    IT_CMDs(cmdstring);
   }
 
   }
@@ -473,7 +536,7 @@ void HandleCommand()
   {
     command_available=true;
   } else {
-    send_cmd();
+    send_cmd(cmdstring);
   }
   }
     // t: Uptime
@@ -482,12 +545,12 @@ void HandleCommand()
   }
   // XQ disable receiver
   else if (cmdstring.charAt(0) == cmd_changeReceiver) {
-    changeReciver();
+    changeReciver(cmdstring);
     //Serial.flush();
   //Serial.end();
   }
   else if (cmdstring.charAt(0) == cmd_changeFilter) {
-    changeFilter();
+    changeFilter(cmdstring);
   }
 
 }
@@ -496,7 +559,7 @@ void HandleCommand()
 
 
 
-void IT_CMDs() {
+void IT_CMDs(String cmdstring) {
 
   // Set Intertechno receive tolerance
   if (cmdstring.charAt(1) == 't') {
@@ -511,6 +574,7 @@ void IT_CMDs() {
     cmdstring.substring(2).toCharArray(msg,3);
     ITrepetition = atoi(msg);
     Serial.println(cmdstring);
+    if(wifiClient) wifiClient.println(cmdstring);
   }
   // Switch Intertechno Devices
   else if (cmdstring.charAt(1) == 's') {
@@ -528,6 +592,7 @@ void IT_CMDs() {
     sendPT2262(msg);
     digitalWrite(PIN_LED,LOW);
     Serial.println(cmdstring);
+    if(wifiClient) wifiClient.println(cmdstring);
   }
   // Get Intertechno Parameters
   else if (cmdstring.charAt(1) == 'p') {
@@ -538,6 +603,7 @@ void IT_CMDs() {
     cPrint += " ";
     cPrint += String(ITbaseduration);
     Serial.println(cPrint);
+    if(wifiClient) wifiClient.println(cPrint);
   }
 
 }
@@ -572,7 +638,7 @@ int freeRam () {
 }
 
 
-void changeReciver() {
+void changeReciver(String cmdstring) {
   if (cmdstring.charAt(1) == 'Q')
   {
     disableReceive();
@@ -594,7 +660,7 @@ void printFilter(uint8_t id)
   Serial.println(";");
 
 }
-void changeFilter()
+void changeFilter(String cmdstring)
 {
   //cmdstring.concat(0);
   char tmp[10];

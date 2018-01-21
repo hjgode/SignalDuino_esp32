@@ -40,6 +40,11 @@
 #include "bitstore.h" //local copy!
 #include "filtering.h"
 
+#define USESOCKET
+#ifdef USESOCKET
+#include <WiFi.h>
+#endif
+
 const uint8_t maxNumPattern=6;
 const uint8_t maxMsgSize=30;
 const uint8_t minMessageLen=40;
@@ -95,8 +100,6 @@ enum status {searching, clockfound, syncfound,detecting};
  class patternBasic {
 
     public:
-
-
         patternBasic();
 		virtual bool detect(int* pulse);        // Runs the detection engine, must be implemented in child class
 		void reset();                           // resets serval internal vars to start with a fresh pattern
@@ -170,6 +173,9 @@ class patternDecoder : public patternDetector{
 	friend class ManchesterpatternDecoder;
 	public:
 		patternDecoder();
+#ifdef USESOCKET
+        patternDecoder(WiFiClient* client);
+#endif
 		void reset();
 
 		bool decode(int* pulse);
@@ -179,7 +185,9 @@ class patternDecoder : public patternDetector{
 		void printMsgRaw(uint8_t start, uint8_t end,String *preamble=NULL,String *postamble=NULL);
 
 	private:
-
+#ifdef USESOCKET
+    WiFiClient* _client;
+#endif
 		//uint8_t byteMessage[maxMsgSize];
 		//byte byteMessageLen;
 
