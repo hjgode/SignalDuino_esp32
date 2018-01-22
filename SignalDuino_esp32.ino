@@ -32,8 +32,8 @@ mosquitto_sub -h atom2 -v -t SignalDuino/#
 
 const int LED_PIN = 5;
 
-#define PROGNAME               "RF_RECEIVER_esp32"
-#define PROGVERS               "0.0.1"
+#define PROGNAME               "SIGNALduino esp32 v0.1"
+#define PROGVERS               "3.3.1"
 
 #define PIN_RECEIVE            14 //2
 #define PIN_LED                LED_PIN // Message-LED
@@ -470,7 +470,6 @@ void IT_CMDs();
 
 void HandleCommand(String cmdstring)
 {
-
   const char cmd_Version ='V';
   const char cmd_freeRam ='R';
   const char cmd_intertechno ='i';
@@ -480,6 +479,7 @@ void HandleCommand(String cmdstring)
   const char cmd_help='?';
   const char cmd_changeFilter ='F';
   const char cmd_send ='S';
+  const char cmd_ping ='P';
 
   // ?: Kommandos anzeigen
 
@@ -496,7 +496,10 @@ void HandleCommand(String cmdstring)
     Serial.print(cmd_send);Serial.print(cmd_space);
   
     Serial.println("");
+    
     if(wifiClient){
+      //wifiClient.println("? Use one of V i R t X F S");
+      //Note: fhem removes blanks in answer!
       wifiClient.print(cmd_help); wifiClient.print(F(" Use one of "));
       wifiClient.print(cmd_Version);wifiClient.print(cmd_space);
       wifiClient.print(cmd_intertechno);wifiClient.print(cmd_space);
@@ -505,6 +508,7 @@ void HandleCommand(String cmdstring)
       wifiClient.print(cmd_changeReceiver);wifiClient.print(cmd_space);
       wifiClient.print(cmd_changeFilter);wifiClient.print(cmd_space);
       wifiClient.print(cmd_send);wifiClient.print(cmd_space);
+      wifiClient.println("");
       
     }
   }
@@ -541,7 +545,13 @@ void HandleCommand(String cmdstring)
   }
     // t: Uptime
   else if (cmdstring.charAt(0) == cmd_uptime) {
-    // tbd
+    // tbd, using ESp32 uptime
+    unsigned long currentMillis = xTaskGetTickCount();
+    currentMillis = millis();
+    Serial.println(currentMillis);
+    if(wifiClient){
+      wifiClient.println(currentMillis);
+    }
   }
   // XQ disable receiver
   else if (cmdstring.charAt(0) == cmd_changeReceiver) {
@@ -551,6 +561,11 @@ void HandleCommand(String cmdstring)
   }
   else if (cmdstring.charAt(0) == cmd_changeFilter) {
     changeFilter(cmdstring);
+  }
+  else if (cmdstring.charAt(0) == cmd_ping) {
+    Serial.println("OK");
+    if(wifiClient)
+      wifiClient.println("OK");
   }
 
 }
